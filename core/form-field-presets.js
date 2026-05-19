@@ -1,36 +1,19 @@
 /**
- * Preset field form — konfigurasi di appjson/form-field-presets.json
- * Tidak mengubah form-builder; dipanggil dari crud-engine sebelum prepareFormSchema.
+ * Preset field form dinonaktifkan.
+ * File JSON preset tidak digunakan, tetapi API ini tetap ada agar pemanggil lama aman.
  */
 (function (global) {
   'use strict';
 
-  const PRESETS_URL = './appjson/form-field-presets.json';
-  let _config = null;
-  let _loadPromise = null;
+  const EMPTY_CONFIG = { presets: {}, fieldPresetByName: {}, rules: [] };
+  let _config = EMPTY_CONFIG;
 
   function deepClone(obj) {
     return JSON.parse(JSON.stringify(obj));
   }
 
   async function ensureLoaded() {
-    if (_config) return _config;
-    if (_loadPromise) return _loadPromise;
-    _loadPromise = fetch(PRESETS_URL, { cache: 'no-store' })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data) => {
-        _config = data || { presets: {}, fieldPresetByName: {}, rules: [] };
-        return _config;
-      })
-      .catch((err) => {
-        console.warn('[FormFieldPresets] Gagal memuat', PRESETS_URL, err);
-        _config = { presets: {}, fieldPresetByName: {}, rules: [] };
-        return _config;
-      });
-    return _loadPromise;
+    return _config;
   }
 
   function getPreset(presetId) {
@@ -62,7 +45,6 @@
   function mergeFieldWithPreset(field, presetId) {
     const base = getPreset(presetId);
     if (!base) {
-      console.warn('[FormFieldPresets] Preset tidak ditemukan:', presetId);
       return field;
     }
     const { preset: _p, ...overrides } = field;

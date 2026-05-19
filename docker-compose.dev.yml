@@ -1,0 +1,57 @@
+# Development Environment - PostgreSQL (sama dengan production)
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pjtki-dev-db
+    environment:
+      POSTGRES_USER: pjtki_dev
+      POSTGRES_PASSWORD: dev_password_123
+      POSTGRES_DB: pjtki_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - dev_data:/var/lib/postgresql/data
+      - ./postgresql-dev.conf:/etc/postgresql/postgresql.conf
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pjtki_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G  # Max memory for PostgreSQL
+          cpus: '2.0'  # CPU limit
+        reservations:
+          memory: 512M
+          cpus: '1.0'
+
+  app:
+    build: .
+    container_name: pjtki-dev-app
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      DATABASE_URL: postgres://pjtki_dev:dev_password_123@postgres:5432/pjtki_dev
+      JWT_SECRET: dev-secret-key-not-for-production-1234567890
+      SEED_ADMIN: "true"
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@gmail.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-gugus$$123$$}
+      ADMIN_ROLE: ${ADMIN_ROLE:-admin}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GEMINI_OCR_MODEL: ${GEMINI_OCR_MODEL:-gemini-2.5-flash-lite}
+    ports:
+      - "${APP_PORT:-3005}:3004"
+    volumes:
+      - ./files:/app/files
+      - ./data:/app/data
+      - ./docs:/app/docs
+      - ./backups:/app/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  dev_data:

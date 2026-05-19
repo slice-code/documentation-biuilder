@@ -1,8 +1,47 @@
 const fs = require('fs');
 const path = require('path');
 const DocRenderer = require('./doc-renderer');
+const docImageService = require('./doc-image-service');
 
 const DOCS_DIR = path.join(__dirname, '../docs');
+
+/**
+ * Konversi semua image block berisi data URI base64 menjadi file pada disk.
+ * Memodifikasi `content.blocks` in-place dan mengembalikan jumlah konversi.
+ */
+function convertBase64ImagesToFiles(content) {
+  if (!content || !Array.isArray(content.blocks)) return 0;
+  let converted = 0;
+
+  for (const block of content.blocks) {
+    if (!block || block.type !== 'image' || !block.data) continue;
+
+    const candidates = [
+      ['url', block.data.url],
+      ['file.url', block.data.file && block.data.file.url]
+    ];
+
+    for (const [field, value] of candidates) {
+      if (!docImageService.isDataUri(value)) continue;
+      try {
+        const publicUrl = docImageService.saveBase64DataUri(value);
+        if (field === 'url') {
+          block.data.url = publicUrl;
+        } else {
+          block.data.file = { ...(block.data.file || {}), url: publicUrl };
+        }
+        if (!block.data.url && block.data.file && block.data.file.url) {
+          block.data.url = block.data.file.url;
+        }
+        converted += 1;
+      } catch (err) {
+        console.warn('[doc-service] Gagal konversi base64 ke file:', err.message);
+      }
+    }
+  }
+
+  return converted;
+}
 
 if (!fs.existsSync(DOCS_DIR)) {
   fs.mkdirSync(DOCS_DIR, { recursive: true });
@@ -119,6 +158,11 @@ class DocService {
         throw new Error('Content with blocks is required');
       }
 
+      const converted = convertBase64ImagesToFiles(content);
+      if (converted > 0) {
+        console.log(`[doc-service] create:${slug} → ${converted} base64 image dikonversi jadi file`);
+      }
+
       return writeMdFile(slug, title, content, metadata, null);
     } catch (error) {
       if (
@@ -151,6 +195,11 @@ class DocService {
 
       if (!content || !content.blocks || !Array.isArray(content.blocks)) {
         throw new Error('Content with blocks is required');
+      }
+
+      const converted = convertBase64ImagesToFiles(content);
+      if (converted > 0) {
+        console.log(`[doc-service] update:${slug} → ${converted} base64 image dikonversi jadi file`);
       }
 
       return writeMdFile(slug, title, content, metadata, existing);

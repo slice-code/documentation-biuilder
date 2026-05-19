@@ -1,7 +1,10 @@
 /**
  * Custom Image Block for EditorJS
- * Converts images to base64 for persistent storage
+ * Default: upload file ke /api/docs/upload-image (server menyimpan jadi file).
+ * Fallback: base64 jika upload gagal (offline / endpoint tidak tersedia).
  */
+const DOC_IMAGE_UPLOAD_URL = '/api/docs/upload-image';
+
 class CustomImage {
     static get toolbox() {
         return {
@@ -124,13 +127,13 @@ class CustomImage {
             fileInput.onchange = (e) => {
                 const file = e.target.files[0];
                 if (file) {
-                    // Show loader while converting
+                    // Show loader while uploading
                     wrapper.classList.add(this.api.styles.loader);
                     wrapper.appendChild(loader);
                     
-                    this._convertToBase64(file).then(base64 => {
-                        this.data = { url: base64, caption: file.name };
-                        image.src = base64;
+                    this._processFileForEditor(file).then(({ url, caption }) => {
+                        this.data = { url, caption: caption || file.name };
+                        image.src = url;
                         
                         // Remove upload area after image loads
                         image.onload = () => {
@@ -161,24 +164,39 @@ class CustomImage {
     }
 
     /**
-     * Convert and compress image to WebP base64
+     * Convert and compress image to WebP base64 (fallback bila upload gagal)
      * Target file size: 100KB - 300KB
      */
     _convertToBase64(file) {
+        return this._compressFileToBlob(file).then((blob) => this._blobToBase64(blob));
+    }
+
+    /**
+     * Pipeline utama: kompres → upload ke server → kembalikan URL public.
+     * Jika gagal upload, fallback ke base64 sehingga editor tetap berfungsi.
+     */
+    _processFileForEditor(file) {
+        return this._compressFileToBlob(file)
+            .then((blob) => this._uploadBlobToServer(blob, file.name)
+                .then((url) => ({ url, caption: file.name }))
+                .catch((err) => {
+                    console.warn('[custom-image] Upload gagal, fallback ke base64:', err.message || err);
+                    return this._blobToBase64(blob).then((base64) => ({ url: base64, caption: file.name }));
+                })
+            );
+    }
+
+    _compressFileToBlob(file) {
         return new Promise((resolve, reject) => {
-            // First read the file as data URL
             const reader = new FileReader();
             reader.onload = (e) => {
                 const img = new Image();
                 img.onload = () => {
-                    // Compress to WebP
-                    this._compressToWebP(img)
-                        .then(resolve)
-                        .catch(reject);
+                    this._compressToBlob(img).then(resolve).catch(reject);
                 };
                 img.onerror = () => {
-                    // If image fails to load, fall back to original
-                    resolve(e.target.result);
+                    // Jika decode gagal (mis. SVG), pakai file asli sebagai blob
+                    resolve(file);
                 };
                 img.src = e.target.result;
             };
@@ -187,10 +205,48 @@ class CustomImage {
         });
     }
 
+    _blobToBase64(blob) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    _uploadBlobToServer(blob, originalName) {
+        return new Promise((resolve, reject) => {
+            try {
+                const fd = new FormData();
+                const ext = (blob.type && blob.type.includes('webp')) ? '.webp'
+                    : (originalName && /\.[a-z0-9]+$/i.test(originalName)) ? originalName.match(/\.[a-z0-9]+$/i)[0]
+                    : '.png';
+                const baseName = (originalName || 'image').replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 40) || 'image';
+                fd.append('image', blob, `${baseName}${ext}`);
+
+                fetch(DOC_IMAGE_UPLOAD_URL, {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'include'
+                })
+                    .then(async (r) => {
+                        const data = await r.json().catch(() => ({}));
+                        if (!r.ok || !data.success || !data.data || !data.data.url) {
+                            throw new Error(data.error || `HTTP ${r.status}`);
+                        }
+                        resolve(data.data.url);
+                    })
+                    .catch(reject);
+            } catch (err) {
+                reject(err);
+            }
+        });
+    }
+
     /**
-     * Compress image to WebP format with target size 100KB-300KB
+     * Kompres image ke WebP Blob target <= 300KB.
      */
-    _compressToWebP(img) {
+    _compressToBlob(img) {
         return new Promise((resolve, reject) => {
             // Calculate dimensions - maintain aspect ratio
             let width = img.naturalWidth || img.width;
@@ -260,16 +316,15 @@ class CustomImage {
             };
             
             findOptimalQuality().then((blob) => {
-                // Convert blob to base64
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    console.log(`Image compressed: ${img.naturalWidth}x${img.naturalHeight} → ${width}x${height}, Size: ${(blob.size / 1024).toFixed(1)}KB`);
-                    resolve(e.target.result);
-                };
-                reader.onerror = reject;
-                reader.readAsDataURL(blob);
+                console.log(`Image compressed: ${img.naturalWidth}x${img.naturalHeight} → ${width}x${height}, Size: ${(blob.size / 1024).toFixed(1)}KB`);
+                resolve(blob);
             }).catch(reject);
         });
+    }
+
+    /** Legacy: tetap tersedia untuk pemanggil lama (paste handler) */
+    _compressToWebP(img) {
+        return this._compressToBlob(img).then((blob) => this._blobToBase64(blob));
     }
 
     save(blockContent) {
@@ -299,10 +354,10 @@ class CustomImage {
             }
             case 'file': {
                 const file = event.detail.file;
-                this._convertToBase64(file).then(base64 => {
-                    this.data = { url: base64, caption: file.name };
+                this._processFileForEditor(file).then(({ url, caption }) => {
+                    this.data = { url, caption: caption || file.name };
                     if (this.nodes.image) {
-                        this.nodes.image.src = base64;
+                        this.nodes.image.src = url;
                     }
                 });
                 break;
@@ -387,13 +442,13 @@ class CustomImage {
                     loader.style.minHeight = '200px';
                     wrapper.appendChild(loader);
                     
-                    this._convertToBase64(file).then(base64 => {
-                        this.data = { url: base64, caption: file.name };
+                    this._processFileForEditor(file).then(({ url, caption }) => {
+                        this.data = { url, caption: caption || file.name };
                         
                         // Create new image
                         const newImg = document.createElement('img');
                         newImg.style.maxWidth = '100%';
-                        newImg.src = base64;
+                        newImg.src = url;
                         
                         newImg.onload = () => {
                             wrapper.classList.remove(this.api.styles.loader);

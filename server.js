@@ -6,6 +6,7 @@ const path = require('path');
 const database = require('./database');
 const auth = require('./auth');
 const uploadService = require('./upload-service');
+const docImageService = require('./services/doc-image-service');
 const { HUB_TYPES } = require('./upload-types');
 const letterService = require('./letter-service');
 const printSuratService = require('./print-surat-service');
@@ -2090,6 +2091,39 @@ async function handleDocRoutes(req, res) {
     }
   }
 
+  // POST /api/docs/upload-image - Upload image dokumentasi (admin), simpan jadi file
+  if (pathname === '/api/docs/upload-image' && req.method === 'POST') {
+    try {
+      const user = auth.getUserFromRequest(req);
+      if (!user || user.role !== 'admin') {
+        json(403, { success: false, error: 'Admin access required' });
+        return true;
+      }
+
+      const { file } = await uploadService.parseMultipart(req);
+      if (!file || !file.buffer || !file.buffer.length) {
+        json(400, { success: false, error: 'File image wajib (field: image)' });
+        return true;
+      }
+
+      const mime = (file.mime || '').toLowerCase();
+      if (!docImageService.ALLOWED_MIME.has(mime === 'image/jpg' ? 'image/jpeg' : mime)) {
+        json(400, { success: false, error: 'Tipe image tidak didukung. Gunakan jpg/png/webp/gif/svg.' });
+        return true;
+      }
+
+      const publicUrl = docImageService.saveImageBuffer(file.buffer, mime, file.filename);
+      json(200, {
+        success: true,
+        data: { url: publicUrl, size: file.buffer.length, mime }
+      });
+      return true;
+    } catch (error) {
+      json(500, { success: false, error: error.message });
+      return true;
+    }
+  }
+
   // POST /api/docs - Create new documentation (requires admin)
   if (pathname === '/api/docs' && req.method === 'POST') {
     try {
@@ -2099,7 +2133,9 @@ async function handleDocRoutes(req, res) {
         return true;
       }
 
-      const body = await readJsonBody(req);
+      // Limit dinaikkan agar payload legacy yang masih membawa base64 image
+      // tetap masuk dan langsung dikonversi jadi file oleh DocService.
+      const body = await readJsonBody(req, 50 * 1024 * 1024);
       const { slug, title, content, category, description } = body;
 
       const doc = await DocService.create(slug, title, content, {
@@ -2131,7 +2167,7 @@ async function handleDocRoutes(req, res) {
       }
 
       const slug = pathname.split('/')[3];
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req, 50 * 1024 * 1024);
       const { title, content, category, description } = body;
 
       const doc = await DocService.update(slug, title, content, {
@@ -2491,6 +2527,12 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    // Public: serve image dokumentasi (/doc-uploads/...) tanpa auth
+    if (req.url.startsWith('/doc-uploads/')) {
+      serveDocImage(req, res, req.url.split('?')[0]);
+      return;
+    }
+
     // Skip API auth for /uploads/* - handled separately in serveUploadedFile
     if (!req.url.startsWith('/uploads/') && !requireApiAuth(req, res)) {
       return;
@@ -2534,6 +2576,33 @@ function sendIndexHtml(res) {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(content);
   });
+}
+
+function serveDocImage(req, res, urlPath) {
+  const abs = docImageService.resolvePublicPath(urlPath);
+  if (!abs || !fs.existsSync(abs)) {
+    res.writeHead(404, { 'Content-Type': 'text/html' });
+    res.end('<h1>404 Not Found</h1>');
+    return true;
+  }
+
+  const ext = path.extname(abs).toLowerCase();
+  const contentType = mimeTypes[ext] || 'application/octet-stream';
+
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+
+  fs.readFile(abs, (err, content) => {
+    if (err) {
+      res.writeHead(500, { 'Content-Type': 'text/html' });
+      res.end('<h1>500 Server Error</h1>');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': contentType });
+    if (req.method === 'HEAD') res.end();
+    else res.end(content);
+  });
+  return true;
 }
 
 function serveUploadedFile(req, res, urlPath) {
@@ -2689,6 +2758,7 @@ function serveStaticOrSpa(req, res) {
   ensureProjectDataDirs();
   await database.init();
   uploadService.ensureUploadRoot();
+  docImageService.ensureRoot();
   try {
     printSuratService.syncProductionTemplates();
     printSuratService.ensureRecordPrintTemplates();
@@ -2782,6 +2852,8 @@ function serveStaticOrSpa(req, res) {
   console.log(`  POST   /api/docs             - Create doc (admin)`);
   console.log(`  PUT    /api/docs/:slug       - Update doc (admin)`);
   console.log(`  DELETE /api/docs/:slug       - Delete doc (admin)`);
+  console.log(`  POST   /api/docs/upload-image - Upload image (admin, multipart field: image)`);
+  console.log(`  GET    /doc-uploads/*        - Image dokumentasi (publik)`);
   });
 })().catch((err) => {
   console.error('[DB] Failed to initialize:', err);

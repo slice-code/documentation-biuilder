@@ -4,7 +4,7 @@
   "description": "Aplikasi dokumentasi berbasis el.js, layout.js, dan Markdown",
   "main": "server.js",
   "scripts": {
-    "check": "node --check server.js && node --check services/doc-service.js && node --check services/doc-renderer.js",
+    "check": "node --check server.js && node --check services/doc-service.js && node --check services/doc-image-service.js && node --check services/doc-renderer.js",
     "test": "npm run check",
     "start": "node server.js",
     "dev": "nodemon server.js",

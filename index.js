@@ -1145,22 +1145,30 @@ function registerDocAdminPage(core) {
 
       container.child(header);
 
+      // Wrapper khusus untuk konten dinamis. Dengan begini, kita bisa `empty()`
+      // body tanpa menghapus header dan tanpa meninggalkan sisa loader di
+      // antrian child el.js (`ch`) yang otherwise akan muncul lagi saat
+      // `container.get()` dipanggil.
+      const body = el('div');
+      container.child(body);
+
       // Loading state
       const loadingEl = el('div').css({
         textAlign: 'center',
         padding: '3rem',
         color: '#64748b'
       }).text('Loading...');
-      container.child(loadingEl);
+      body.child(loadingEl);
+      body.get(); // flush agar loader langsung tampil
 
       try {
         const response = await fetch('/api/docs');
         const result = await response.json();
 
-        loadingEl.remove();
+        body.empty();
 
         if (!result.success || !result.data || result.data.length === 0) {
-          container.child(
+          body.child(
             el('div').css({
               textAlign: 'center',
               padding: '3rem',
@@ -1184,6 +1192,7 @@ function registerDocAdminPage(core) {
                 .click(() => layout.navigate('/admin/create'))
             ])
           );
+          body.get();
           return container.get();
         }
 
@@ -1276,11 +1285,18 @@ function registerDocAdminPage(core) {
         });
 
         table.child(tbody);
-        container.child(table);
+        body.child(table);
+        body.get();
 
       } catch (error) {
         console.error('Failed to load documentation:', error);
-        loadingEl.text('Failed to load documentation.').css({ color: '#dc2626' });
+        body.empty();
+        body.child(
+          el('div')
+            .text('Failed to load documentation.')
+            .css({ textAlign: 'center', padding: '3rem', color: '#dc2626' })
+        );
+        body.get();
       }
 
       return container.get();

@@ -496,6 +496,13 @@ const editor = async ({el, onClose, onSave, categories = [], type = 'newsletter'
               updateUndoRedoButtons();
             }
           }),
+        el('button')
+          .class('px-3 py-1 hover:bg-gray-100 rounded text-gray-600')
+          .attr('title', 'Import Markdown')
+          .html('<i class="fab fa-markdown"></i> Import MD')
+          .on('click', () => {
+            openImportMarkdownModal();
+          }),
       ]),
       el('div').class('text-xs text-gray-400').link(connection, 'autoSaveIndicator'),
     ]);
@@ -1781,6 +1788,234 @@ ${block.data.code}
     });
     
     return md;
+  }
+
+  function stripMarkdownInline(text) {
+    return String(text || '')
+      .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/(\*\*|__)(.*?)\1/g, '$2')
+      .replace(/(\*|_)(.*?)\1/g, '$2')
+      .replace(/`([^`]+)`/g, '$1')
+      .trim();
+  }
+
+  function setEditorFieldValue(key, value) {
+    const target = editorData[key];
+    if (!target || value == null) return;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+      target.value = value;
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
+    editorData[key] = value;
+  }
+
+  function markdownToEditorData(markdown) {
+    let source = String(markdown || '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+    const lines = source.split(/\r?\n/);
+    const blocks = [];
+    let title = '';
+    let i = 0;
+
+    const isBlockStart = (line) => {
+      const t = line.trim();
+      return /^#{1,6}\s+/.test(t)
+        || t.startsWith('```')
+        || /^[-*+]\s+/.test(t)
+        || /^\d+\.\s+/.test(t)
+        || t.startsWith('>')
+        || /^!\[/.test(t)
+        || /^\|.+\|$/.test(t)
+        || /^---+$/.test(t)
+        || /^\*\*\*+$/.test(t);
+    };
+
+    while (i < lines.length) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (!trimmed) {
+        i += 1;
+        continue;
+      }
+
+      const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+      if (heading) {
+        const level = heading[1].length;
+        const text = stripMarkdownInline(heading[2]);
+        if (level === 1 && !title && blocks.length === 0) {
+          title = text;
+        } else {
+          blocks.push({ type: 'header', data: { level, text } });
+        }
+        i += 1;
+        continue;
+      }
+
+      if (/^---+$/.test(trimmed) || /^\*\*\*+$/.test(trimmed)) {
+        blocks.push({ type: 'divider', data: {} });
+        i += 1;
+        continue;
+      }
+
+      if (trimmed.startsWith('```')) {
+        const language = trimmed.slice(3).trim();
+        i += 1;
+        const codeLines = [];
+        while (i < lines.length && !lines[i].trim().startsWith('```')) {
+          codeLines.push(lines[i]);
+          i += 1;
+        }
+        if (i < lines.length) i += 1;
+        blocks.push({ type: 'code', data: { code: codeLines.join('\n'), language } });
+        continue;
+      }
+
+      if (trimmed.startsWith('>')) {
+        const quoteLines = [];
+        while (i < lines.length && lines[i].trim().startsWith('>')) {
+          quoteLines.push(lines[i].replace(/^>\s?/, ''));
+          i += 1;
+        }
+        blocks.push({ type: 'quote', data: { text: quoteLines.join('\n'), caption: '' } });
+        continue;
+      }
+
+      if (/^\|.+\|$/.test(trimmed)) {
+        const rows = [];
+        while (i < lines.length && /^\|.+\|$/.test(lines[i].trim())) {
+          const cells = lines[i].trim().slice(1, -1).split('|').map((cell) => cell.trim());
+          if (!cells.every((cell) => /^:?-+:?$/.test(cell))) rows.push(cells);
+          i += 1;
+        }
+        if (rows.length) blocks.push({ type: 'table', data: { content: rows } });
+        continue;
+      }
+
+      if (/^[-*+]\s+/.test(trimmed)) {
+        const items = [];
+        while (i < lines.length) {
+          const item = lines[i].trim().match(/^[-*+]\s+(.+)$/);
+          if (!item) break;
+          items.push(stripMarkdownInline(item[1]));
+          i += 1;
+        }
+        blocks.push({ type: 'list', data: { style: 'unordered', items } });
+        continue;
+      }
+
+      if (/^\d+\.\s+/.test(trimmed)) {
+        const items = [];
+        while (i < lines.length) {
+          const item = lines[i].trim().match(/^\d+\.\s+(.+)$/);
+          if (!item) break;
+          items.push(stripMarkdownInline(item[1]));
+          i += 1;
+        }
+        blocks.push({ type: 'list', data: { style: 'ordered', items } });
+        continue;
+      }
+
+      const image = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)/);
+      if (image) {
+        blocks.push({
+          type: 'image',
+          data: { url: image[2], file: { url: image[2] }, caption: image[1], alt: image[1] }
+        });
+        i += 1;
+        continue;
+      }
+
+      const paragraphLines = [line];
+      i += 1;
+      while (i < lines.length && lines[i].trim() && !isBlockStart(lines[i])) {
+        paragraphLines.push(lines[i]);
+        i += 1;
+      }
+      blocks.push({ type: 'paragraph', data: { text: paragraphLines.join('<br>') } });
+    }
+
+    return {
+      title,
+      content: {
+        time: Date.now(),
+        blocks: blocks.length ? blocks : [{ type: 'paragraph', data: { text: '' } }]
+      }
+    };
+  }
+
+  async function importMarkdownContent(markdown) {
+    if (!connection.ej) return;
+    const parsed = markdownToEditorData(markdown);
+    const current = await connection.ej.save();
+    const hasContent = current.blocks && current.blocks.some((block) => {
+      const data = block.data || {};
+      return Object.values(data).some((value) => String(value || '').trim());
+    });
+
+    if (hasContent && !confirm('Import Markdown akan mengganti isi editor. Lanjutkan?')) return;
+
+    await connection.ej.render(parsed.content);
+    if (parsed.title) setEditorFieldValue('title', parsed.title);
+    hasUnsavedChanges = true;
+    editorHistory.saveState(parsed.content);
+    updateUndoRedoButtons();
+  }
+
+  function openImportMarkdownModal() {
+    if (!connection.ej) return;
+
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 flex items-center justify-center z-50';
+    modal.style.cssText = 'font-family: system-ui, -apple-system, sans-serif; background: rgba(0, 0, 0, 0.25);';
+    modal.innerHTML = `
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden">
+        <div class="p-4 border-b flex justify-between items-center">
+          <h2 class="text-xl font-semibold">Import Markdown</h2>
+          <button class="text-gray-500 hover:text-gray-700 text-2xl modal-close">&times;</button>
+        </div>
+        <div class="p-4 space-y-3">
+          <input type="file" accept=".md,.markdown,text/markdown,text/plain" class="w-full p-2 border rounded md-file">
+          <textarea class="w-full h-80 p-3 border rounded font-mono text-sm md-input" placeholder="Paste Markdown di sini..."></textarea>
+          <p class="text-sm text-gray-500">Heading H1 pertama akan dipakai sebagai judul dokumentasi.</p>
+        </div>
+        <div class="p-4 border-t flex justify-end gap-2">
+          <button class="px-4 py-2 text-gray-700 bg-gray-100 rounded hover:bg-gray-200 modal-close">Batal</button>
+          <button class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 btn-import-md">Import</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const textarea = modal.querySelector('.md-input');
+    const fileInput = modal.querySelector('.md-file');
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      textarea.value = await file.text();
+    });
+
+    modal.addEventListener('click', async (e) => {
+      const target = e.target;
+      if (target.classList.contains('modal-close') || target === modal) {
+        modal.remove();
+        return;
+      }
+
+      if (target.classList.contains('btn-import-md')) {
+        const markdown = textarea.value.trim();
+        if (!markdown) {
+          alert('Isi Markdown masih kosong.');
+          return;
+        }
+        await importMarkdownContent(markdown);
+        modal.remove();
+      }
+    });
   }
 
   // ============================================

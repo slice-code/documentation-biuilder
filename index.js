@@ -691,7 +691,9 @@ function registerDocHomePage(core) {
               article.doc-content h3 { font-size: 1.5rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.75rem; color: #0f172a; }
               article.doc-content p { font-size: 1rem; line-height: 1.75; color: #374151; margin-bottom: 1.25rem; }
               article.doc-content ul, article.doc-content ol { margin-bottom: 1.25rem; padding-left: 2rem; }
-              article.doc-content li { margin-bottom: 0.5rem; line-height: 1.75; color: #374151; }
+              article.doc-content ul { list-style-type: disc; }
+              article.doc-content ol { list-style-type: decimal; }
+              article.doc-content li { display: list-item; margin-bottom: 0.5rem; line-height: 1.75; color: #374151; }
               article.doc-content pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 0.5rem; padding: 1.25rem; overflow-x: auto; margin-bottom: 1.5rem; }
               article.doc-content code { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 0.375rem; padding: 0.2rem 0.4rem; font-size: 0.875rem; color: #24292e; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
               article.doc-content pre code { background: transparent; border: none; padding: 0; }
@@ -1055,7 +1057,9 @@ function registerDocViewerPage(core) {
           article.doc-content h3 { font-size: 1.5rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.75rem; color: #0f172a; }
           article.doc-content p { font-size: 1rem; line-height: 1.75; color: #374151; margin-bottom: 1.25rem; }
           article.doc-content ul, article.doc-content ol { margin-bottom: 1.25rem; padding-left: 2rem; }
-          article.doc-content li { margin-bottom: 0.5rem; line-height: 1.75; color: #374151; }
+          article.doc-content ul { list-style-type: disc; }
+          article.doc-content ol { list-style-type: decimal; }
+          article.doc-content li { display: list-item; margin-bottom: 0.5rem; line-height: 1.75; color: #374151; }
           article.doc-content pre { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 0.5rem; padding: 1.25rem; overflow-x: auto; margin-bottom: 1.5rem; }
           article.doc-content code { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 0.375rem; padding: 0.2rem 0.4rem; font-size: 0.875rem; color: #24292e; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; }
           article.doc-content pre code { background: transparent; border: none; padding: 0; }
@@ -1307,7 +1311,7 @@ function buildDocEditorComponent(isNew, editSlug) {
         }
       }
 
-      const { editor } = await import('./library/editor-element/editor.js?v=20260519a');
+      const { editor } = await import('./library/editor-element/editor.js?v=20260519b');
       const initialTitle = existingData?.title || '';
       const initialSlug = existingData?.slug || '';
       const initialCategory = existingData?.category || 'Guide';
@@ -1543,7 +1547,7 @@ function buildDocEditorComponent(isNew, editSlug) {
 
         try {
           // Import editor
-          const { editor } = await import('./library/editor-element/editor.js?v=20260519a');
+          const { editor } = await import('./library/editor-element/editor.js?v=20260519b');
 
           // Open editor modal
           const editorInstance = await editor({

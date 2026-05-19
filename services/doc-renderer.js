@@ -305,8 +305,16 @@ class DocRenderer {
   static renderList(data) {
     const items = data.items || [];
     const tag = data.style === 'ordered' ? 'ol' : 'ul';
-    const itemsHtml = items.map((item) => `<li>${typeof item === 'string' ? item : item}</li>`).join('');
-    return `<${tag}>${itemsHtml}</${tag}>`;
+    const renderItem = (item) => {
+      if (typeof item === 'string') return `<li>${item}</li>`;
+      const content = item?.content || item?.text || '';
+      const children = Array.isArray(item?.items) && item.items.length
+        ? `<${tag}>${item.items.map(renderItem).join('')}</${tag}>`
+        : '';
+      return `<li>${content}${children}</li>`;
+    };
+    const itemsHtml = items.map(renderItem).join('');
+    return `<${tag} class="doc-list doc-list-${data.style === 'ordered' ? 'ordered' : 'unordered'}">${itemsHtml}</${tag}>`;
   }
 
   static renderQuote(data) {

@@ -310,6 +310,59 @@ function loadSchemas() {
   return schemas;
 }
 
+/** Clone tanpa schema/*.json: buat tabel users agar auth & seed tidak gagal */
+async function ensureMinimalUsersTableIfMissing() {
+  if (!db) return;
+  try {
+    let exists = false;
+    if (isPostgres()) {
+      const row = await q(
+        db.prepare(
+          `SELECT 1 AS ok FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users' LIMIT 1`
+        ),
+        'get'
+      );
+      exists = !!row;
+    } else {
+      const row = await q(
+        db.prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'users' LIMIT 1`),
+        'get'
+      );
+      exists = !!row;
+    }
+    if (exists) return;
+
+    const sql = isPostgres()
+      ? `CREATE TABLE IF NOT EXISTS "users" (
+  "id" SERIAL PRIMARY KEY,
+  "name" TEXT,
+  "email" TEXT NOT NULL UNIQUE,
+  "password" TEXT NOT NULL,
+  "role" TEXT DEFAULT 'admin',
+  "status" TEXT DEFAULT 'active',
+  "phone" TEXT DEFAULT ''
+);`
+      : `CREATE TABLE IF NOT EXISTS "users" (
+  "id" INTEGER PRIMARY KEY AUTOINCREMENT,
+  "name" TEXT,
+  "email" TEXT NOT NULL UNIQUE,
+  "password" TEXT NOT NULL,
+  "role" TEXT DEFAULT 'admin',
+  "status" TEXT DEFAULT 'active',
+  "phone" TEXT DEFAULT ''
+);`;
+
+    if (isPostgres()) await db.exec(sql);
+    else {
+      db.exec(sql);
+      persistDb();
+    }
+    console.log('[DB] Tabel users minimal dibuat (belum ada schema JSON)');
+  } catch (e) {
+    console.warn('[DB] ensureMinimalUsersTableIfMissing:', e.message);
+  }
+}
+
 async function initSqlite() {
   const SQL = await initSqlJs();
 
@@ -333,6 +386,8 @@ async function initSqlite() {
     db.exec(sql);
     tableNames.push(name);
   }
+
+  await ensureMinimalUsersTableIfMissing();
 
   await syncSchemaColumns(schemas);
   await ensureIndexes();
@@ -361,6 +416,8 @@ async function initPostgres() {
     await db.exec(sql);
     tableNames.push(name);
   }
+
+  await ensureMinimalUsersTableIfMissing();
 
   await syncSchemaColumns(schemas);
   await ensureIndexes();

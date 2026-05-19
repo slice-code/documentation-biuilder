@@ -340,15 +340,39 @@ const appjsonDir = path.join(__dirname, 'appjson');
 
 let pagesIndexCache = null;
 
+/** Pastikan folder data proyek ada (clone baru sering tidak membawa folder kosong). */
+function ensureProjectDataDirs() {
+  const dirs = [appjsonDir, path.join(__dirname, 'schema'), path.join(__dirname, 'docs')];
+  for (const d of dirs) {
+    try {
+      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+    } catch (e) {
+      console.warn('[init] mkdir gagal:', d, e.message);
+    }
+  }
+}
+
 function invalidatePagesIndex() {
   pagesIndexCache = null;
 }
 
 function buildPagesIndex() {
   if (pagesIndexCache) return pagesIndexCache;
+  try {
+    if (!fs.existsSync(appjsonDir)) fs.mkdirSync(appjsonDir, { recursive: true });
+  } catch (e) {
+    console.warn('[appjson] mkdir:', e.message);
+  }
   const byPath = {};
   const list = [];
-  const files = fs.readdirSync(appjsonDir).filter((f) => f.endsWith('.json') && f !== 'menu.json');
+  let files = [];
+  try {
+    files = fs.readdirSync(appjsonDir).filter((f) => f.endsWith('.json') && f !== 'menu.json');
+  } catch (e) {
+    console.warn('[appjson] baca folder kosong/gagal, indeks halaman kosong:', e.message);
+    pagesIndexCache = { list, byPath };
+    return pagesIndexCache;
+  }
   for (const file of files) {
     const name = file.replace('.json', '');
     const content = JSON.parse(fs.readFileSync(path.join(appjsonDir, file), 'utf8'));
@@ -380,7 +404,13 @@ async function handleApiRoutes(req, res) {
   // GET /api/schema - List all available schemas
   if (req.url === '/api/schema' && req.method === 'GET') {
     try {
-      const files = fs.readdirSync(schemaDir).filter(f => f.endsWith('.json'));
+      if (!fs.existsSync(schemaDir)) fs.mkdirSync(schemaDir, { recursive: true });
+      let files = [];
+      try {
+        files = fs.readdirSync(schemaDir).filter(f => f.endsWith('.json'));
+      } catch {
+        files = [];
+      }
       const schemas = files.map(file => {
         const content = JSON.parse(fs.readFileSync(path.join(schemaDir, file), 'utf8'));
         return {
@@ -2656,6 +2686,7 @@ function serveStaticOrSpa(req, res) {
 
 // Initialize database before starting server (sql.js — async)
 (async () => {
+  ensureProjectDataDirs();
   await database.init();
   uploadService.ensureUploadRoot();
   try {
